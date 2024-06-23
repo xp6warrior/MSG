@@ -48,6 +48,12 @@ int main(int argc, char **argv) {
     }
     printf("Connected to server\n");
 
+    while (1) {
+        char buffer[32];
+        scanf("%s", buffer);
+        send(sock, buffer, sizeof buffer, 0);
+    }
+
     // Close
     close(sock);
 

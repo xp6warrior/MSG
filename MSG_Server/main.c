@@ -3,6 +3,7 @@
 #include <netdb.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,10 @@ void getDefaultIP(char *ip, int size) {
     freeifaddrs(addrs);
 }
 
+struct client {
+    int socket;
+    char addr[INET6_ADDRSTRLEN];
+};
 
 int main(int argc, char **argv) {
     char *ipAddress = DEFAULT_IP;
@@ -62,7 +67,7 @@ int main(int argc, char **argv) {
     printf("Initialied address\n");
 
     // Server socket
-    int s_sock = socket(AF_INET, SOCK_STREAM, 0);
+    int s_sock = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
     if (s_sock == 0) {
         fprintf(stderr, "ERROR: unable to create socked\n");
         return -2;
@@ -91,16 +96,36 @@ int main(int argc, char **argv) {
     }
     
 
+    struct client *clients[8];
+    int c_size = 0;
+
     // System loop
     while (1) {
+        // Establish new connections
         struct sockaddr_in c_addr;
-        int size = sizeof c_addr;
+        int addrSize = sizeof c_addr;
+        int c_sock = accept(s_sock, (struct sockaddr *) &c_addr, &addrSize);
+        if (c_sock != -1) {
+            char *c_ip;
+            c_ip = inet_ntoa(c_addr.sin_addr);
 
-        accept(s_sock, (struct sockaddr *) &c_addr, &size);
+            struct client c;
+            c.socket = c_sock;
+            strcpy(c.addr, c_ip);
+            struct client *c_ptr = malloc(sizeof (struct client));
+            *c_ptr = c;
+            clients[c_size++] = c_ptr;
 
-        char *c_ip;
-        inet_ntop(c_addr.sin_family, &(c_addr.sin_addr), c_ip, INET6_ADDRSTRLEN);
-        printf("%s has connected\n", c_ip);
+            printf("%s has connected\n", c_ip);
+        }
+
+        // Recieve messeges from clients
+        for (int i=0; i<c_size; i++) {
+            char buffer[32];
+            if (recv(clients[i]->socket, buffer, sizeof buffer, 0) != -1) {
+                printf("%s : %s\n", clients[i]->addr, buffer);
+            }
+        }
     }
 
     // Close
