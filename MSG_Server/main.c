@@ -1,40 +1,18 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netdb.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "server.h"
 
 #define DEFAULT_PORT 8000
 #define DEFAULT_IP "0.0.0.0"
-
-void getDefaultIP(char *ip, int size) {
-    struct ifaddrs *addrs, *ptr;
-    if (getifaddrs(&addrs) == -1) {
-        fprintf(stderr, "ERROR: unable to retrieve default IP\n");
-        return;
-    }
-
-    for (ptr = addrs; ptr != NULL; ptr = ptr->ifa_next) {
-        if (ptr->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *) ptr->ifa_addr;
-            inet_ntop(AF_INET, &(ipv4->sin_addr), ip, size);
-            if (ip != NULL)
-                break;
-        }
-    }
-    freeifaddrs(addrs);
-}
-
-struct client {
-    int socket;
-    char addr[INET6_ADDRSTRLEN];
-};
 
 int main(int argc, char **argv) {
     char *ipAddress = DEFAULT_IP;
@@ -67,9 +45,9 @@ int main(int argc, char **argv) {
     printf("Initialied address\n");
 
     // Server socket
-    int s_sock = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
+    int s_sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0); // NONBLOCK so accepting dosent block the loop
     if (s_sock == 0) {
-        fprintf(stderr, "ERROR: unable to create socked\n");
+        fprintf(stderr, "ERROR: unable to create socket\n");
         return -2;
     }
     printf("Created socket\n");
@@ -96,35 +74,35 @@ int main(int argc, char **argv) {
     }
     
 
-    struct client *clients[8];
-    int c_size = 0;
+    struct client *clientList = NULL;
 
-    // System loop
+    // Server loop
     while (1) {
         // Establish new connections
-        struct sockaddr_in c_addr;
-        int addrSize = sizeof c_addr;
-        int c_sock = accept(s_sock, (struct sockaddr *) &c_addr, &addrSize);
-        if (c_sock != -1) {
-            char *c_ip;
-            c_ip = inet_ntoa(c_addr.sin_addr);
-
-            struct client c;
-            c.socket = c_sock;
-            strcpy(c.addr, c_ip);
-            struct client *c_ptr = malloc(sizeof (struct client));
-            *c_ptr = c;
-            clients[c_size++] = c_ptr;
-
-            printf("%s has connected\n", c_ip);
-        }
+        establishConnections(s_sock, &clientList);
 
         // Recieve messeges from clients
-        for (int i=0; i<c_size; i++) {
+        struct client *ptr = clientList;
+        while (ptr != NULL) {
             char buffer[32];
-            if (recv(clients[i]->socket, buffer, sizeof buffer, 0) != -1) {
-                printf("%s : %s\n", clients[i]->addr, buffer);
+
+            struct pollfd recvPoll;
+            recvPoll.fd = ptr->sockfd;
+            recvPoll.events = POLLIN;
+
+            if (poll(&recvPoll, 1, 100)) {
+                int recieveStatus = recv(ptr->sockfd, buffer, sizeof buffer, 0);
+
+                if (recieveStatus == -1) continue;
+                if (recieveStatus == 0) {
+                    printf("%s has disconnected\n", ptr->addr);
+                    disconnectClient(ptr, &clientList);
+                    continue;
+                }
+                printf("%s: %s\n", ptr->addr, buffer);
             }
+
+            ptr = ptr->next;
         }
     }
 
