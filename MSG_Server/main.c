@@ -13,6 +13,8 @@
 
 #define DEFAULT_PORT 8000
 #define DEFAULT_IP "0.0.0.0"
+#define MAX_MSG_LEN 64
+#define MAX_RECORD_LEN INET6_ADDRSTRLEN + MAX_MSG_LEN + 3
 
 int main(int argc, char **argv) {
     char *ipAddress = DEFAULT_IP;
@@ -37,7 +39,7 @@ int main(int argc, char **argv) {
             return -1;
     }
 
-    // Initialising address
+    // Initialising address struct
     struct sockaddr_in s_addr;
     s_addr.sin_family = AF_INET;
     s_addr.sin_port = htons(port);
@@ -64,7 +66,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ERROR: unable to listen\n");
         return -4;
     }
-
     if (ipAddress == DEFAULT_IP) {
         char displayip[INET_ADDRSTRLEN];
         getDefaultIP(displayip, sizeof displayip);
@@ -74,36 +75,61 @@ int main(int argc, char **argv) {
     }
     
 
-    struct client *clientList = NULL;
-
     // Server loop
+    // TODO fix linked list problem (disconnecting last joined client dosent show disconnected message)
+    struct client *clientList = NULL;
     while (1) {
         // Establish new connections
-        establishConnections(s_sock, &clientList);
+        struct client *connected = establishConnections(s_sock, &clientList);
+        if (connected != NULL)
+            printf("%s has connected\n", connected->addr);
 
         // Recieve messeges from clients
         struct client *ptr = clientList;
+        char *allMess = NULL;
+        int allMess_len = 0;
+
         while (ptr != NULL) {
-            char buffer[32];
+            char buffer[MAX_MSG_LEN];
+            int recvStatus = recieveMessages(ptr, buffer, sizeof buffer);
 
-            struct pollfd recvPoll;
-            recvPoll.fd = ptr->sockfd;
-            recvPoll.events = POLLIN;
+            // TODO abstract
+            if (recvStatus != -1) {
+                char msg[MAX_RECORD_LEN];
 
-            if (poll(&recvPoll, 1, 100)) {
-                int recieveStatus = recv(ptr->sockfd, buffer, sizeof buffer, 0);
-
-                if (recieveStatus == -1) continue;
-                if (recieveStatus == 0) {
-                    printf("%s has disconnected\n", ptr->addr);
+                if (recvStatus == 0) {
+                    snprintf(msg, MAX_RECORD_LEN, "%s had disconnected\n", ptr->addr);
+                    printf("%s", msg);
+                    allMess_len += INET6_ADDRSTRLEN + 18;
                     disconnectClient(ptr, &clientList);
-                    continue;
+                } else {
+                    snprintf(msg, MAX_RECORD_LEN, "%s: %s\n", ptr->addr, buffer); 
+                    printf("%s", msg);
+                    allMess_len += MAX_RECORD_LEN;
                 }
-                printf("%s: %s\n", ptr->addr, buffer);
-            }
 
+                if (allMess == NULL) {
+                    allMess = malloc(allMess_len);
+                    strcpy(allMess, msg);
+                } else {
+                    char *p = realloc(allMess, allMess_len);
+                    free(allMess);
+                    allMess = p;
+                }
+            }
             ptr = ptr->next;
         }
+
+        // Replicate messages to all clients
+        ptr = clientList;
+        while (ptr != NULL) {
+            if (allMess != NULL) {
+                send(ptr->sockfd, allMess, allMess_len, 0);
+            }
+            ptr = ptr->next;
+        }
+
+        free(allMess);
     }
 
     // Close

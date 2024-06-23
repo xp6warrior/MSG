@@ -2,10 +2,11 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <poll.h>
+#include <errno.h>
 
 int main(int argc, char **argv) {
     char *ipAddress;
@@ -48,10 +49,29 @@ int main(int argc, char **argv) {
     }
     printf("Connected to server\n");
 
+    // Polling
+    struct pollfd sendPoll;
+    sendPoll.fd = 0;
+    sendPoll.events = POLLIN;
+    struct pollfd recvPoll;
+    recvPoll.fd = sock;
+    recvPoll.events = POLLIN;
+
     while (1) {
         char buffer[32];
-        scanf("%s", buffer);
-        send(sock, buffer, sizeof buffer, 0);
+
+        // Send
+        if (poll(&sendPoll, 1, 100) == 1) {
+            scanf("%s", buffer);
+            send(sock, buffer, sizeof buffer, 0);
+        }
+
+        // Recieve
+        if (poll(&recvPoll, 1, 100) == 1) {
+            char allMsgs[256];
+            recv(sock, allMsgs, 256, 0);
+            printf("%s", allMsgs);
+        }
     }
 
     // Close
