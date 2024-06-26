@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
         // Send
         if (poll(&sendPoll, 1, 100) == 1) {
             scanf("%s", buffer);
+            printf("%s\n", buffer);
             send(sock, buffer, sizeof buffer, 0);
         }
 

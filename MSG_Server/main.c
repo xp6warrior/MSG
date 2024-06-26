@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ERROR: unable to bind socket\n");
         return -3;
     }
-    printf("Bound socked\n");
+    printf("Bound socket\n");
     
     // Listen for connections
     if (listen(s_sock, 5) == -1) {
@@ -78,6 +78,9 @@ int main(int argc, char **argv) {
     // Server loop
     // TODO fix linked list problem (disconnecting last joined client dosent show disconnected message)
     struct client *clientList = NULL;
+    struct client serverClient = { 0, "Server", NULL };
+    addClient(&serverClient, &clientList);
+
     while (1) {
         // Establish new connections
         struct client *connected = establishConnections(s_sock, &clientList);
@@ -86,50 +89,31 @@ int main(int argc, char **argv) {
 
         // Recieve messeges from clients
         struct client *ptr = clientList;
-        char *allMess = NULL;
-        int allMess_len = 0;
-
-        while (ptr != NULL) {
-            char buffer[MAX_MSG_LEN];
-            int recvStatus = recieveMessages(ptr, buffer, sizeof buffer);
-
-            // TODO abstract
-            if (recvStatus != -1) {
-                char msg[MAX_RECORD_LEN];
-
-                if (recvStatus == 0) {
-                    snprintf(msg, MAX_RECORD_LEN, "%s had disconnected\n", ptr->addr);
-                    printf("%s", msg);
-                    allMess_len += INET6_ADDRSTRLEN + 18;
-                    disconnectClient(ptr, &clientList);
-                } else {
-                    snprintf(msg, MAX_RECORD_LEN, "%s: %s\n", ptr->addr, buffer); 
-                    printf("%s", msg);
-                    allMess_len += MAX_RECORD_LEN;
-                }
-
-                if (allMess == NULL) {
-                    allMess = malloc(allMess_len);
-                    strcpy(allMess, msg);
-                } else {
-                    char *p = realloc(allMess, allMess_len);
-                    free(allMess);
-                    allMess = p;
-                }
-            }
+        char record[MAX_RECORD_LEN];
+        char text[MAX_MSG_LEN];
+        int recvStatus = recieveMessages(ptr, text, sizeof text);
+        
+        while (ptr != NULL && recvStatus == -1) {
             ptr = ptr->next;
+            recvStatus = recieveMessages(ptr, text, sizeof text);
         }
+        if (recvStatus == 0) { // disconnected
+            snprintf(record, sizeof record, "%s has disconnected\n", ptr->addr);
+            printf("%s", record);
+            removeClient(ptr, &clientList);
+        } else if (recvStatus != -1) { // message
+            snprintf(record, sizeof record, "%s: %s\n", ptr->addr, text);
+            printf("%s", record);
+        }
+
+        // TODO Server commands
 
         // Replicate messages to all clients
         ptr = clientList;
-        while (ptr != NULL) {
-            if (allMess != NULL) {
-                send(ptr->sockfd, allMess, allMess_len, 0);
-            }
+        while (ptr != NULL && recvStatus != -1) {
+            send(ptr->sockfd, record, sizeof record, 0);
             ptr = ptr->next;
         }
-
-        free(allMess);
     }
 
     // Close
