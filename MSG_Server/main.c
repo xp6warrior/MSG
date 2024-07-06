@@ -10,17 +10,19 @@
 #include <arpa/inet.h>
 
 #include "server.h"
+#include "commands.h"
 
 #define DEFAULT_PORT 8000
 #define DEFAULT_IP "0.0.0.0"
 #define MAX_MSG_LEN 64
-#define MAX_RECORD_LEN INET6_ADDRSTRLEN + MAX_MSG_LEN + 3
+#define MAX_RECORD_LEN 46 + MAX_MSG_LEN + 3
+
 
 int main(int argc, char **argv) {
     char *ipAddress = DEFAULT_IP;
     unsigned short int port = DEFAULT_PORT;
 
-    // Initialising IP and port
+    // Initialising IP and port from arguments
     switch (argc) {
         case 1: // default ip default port
             printf("No IP address specified, default to system IP\n");
@@ -46,7 +48,7 @@ int main(int argc, char **argv) {
     inet_pton(AF_INET, ipAddress, &(s_addr.sin_addr));
     printf("Initialied address\n");
 
-    // Server socket
+    // Creates server socket
     int s_sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0); // NONBLOCK so accepting dosent block the loop
     if (s_sock == 0) {
         fprintf(stderr, "ERROR: unable to create socket\n");
@@ -54,14 +56,14 @@ int main(int argc, char **argv) {
     }
     printf("Created socket\n");
 
-    // Binding socket
+    // Binds server socket to IP and port (addr struct)
     if (bind(s_sock, (struct sockaddr *) &s_addr, sizeof s_addr) == -1) {
         fprintf(stderr, "ERROR: unable to bind socket\n");
         return -3;
     }
     printf("Bound socket\n");
     
-    // Listen for connections
+    // Listens for connections
     if (listen(s_sock, 5) == -1) {
         fprintf(stderr, "ERROR: unable to listen\n");
         return -4;
@@ -76,44 +78,69 @@ int main(int argc, char **argv) {
     
 
     // Server loop
-    // TODO fix linked list problem (disconnecting last joined client dosent show disconnected message)
+    // Every loop cycle has 1 record string
+    // First, the record is filled via actions from the clients, such as connecting or sending a message
+    // Next, if the recored is filled, the program jumps to processing the record (running commands, replication to clients)
+    
+    // Adds server stdin as a 'client'
     struct client *clientList = NULL;
-    struct client serverClient = { 0, "Server", NULL };
+    struct client serverClient = { 0, "Server", 1, NULL };
     addClient(&serverClient, &clientList);
 
     while (1) {
+        char record[MAX_RECORD_LEN] = {'\0'};
+        struct client *cPtr;
+        int ignorefd = -1;
+
+        /* CHECKING FOR CLIENT ACTIONS, FILLING RECORD */
         // Establish new connections
-        struct client *connected = establishConnections(s_sock, &clientList);
-        if (connected != NULL)
-            printf("%s has connected\n", connected->addr);
+        cPtr = establishConnections(s_sock, &clientList);
+        if (cPtr != NULL) {
+            snprintf(record, sizeof record, "%s has connected\n", cPtr->addr);
+            ignorefd = cPtr->sockfd;
+            goto record_filled;
+        }
 
         // Recieve messeges from clients
-        struct client *ptr = clientList;
-        char record[MAX_RECORD_LEN];
+        // TODO Fix messages with spaces sent from clients
+        cPtr = clientList;
         char text[MAX_MSG_LEN];
-        int recvStatus = recieveMessages(ptr, text, sizeof text);
-        
-        while (ptr != NULL && recvStatus == -1) {
-            ptr = ptr->next;
-            recvStatus = recieveMessages(ptr, text, sizeof text);
+        int recvStatus = recieveMessage(cPtr, text, sizeof text);
+        while (cPtr != NULL && recvStatus == -1) {
+            cPtr = cPtr->next;
+            recvStatus = recieveMessage(cPtr, text, sizeof text);
         }
         if (recvStatus == 0) { // disconnected
-            snprintf(record, sizeof record, "%s has disconnected\n", ptr->addr);
-            printf("%s", record);
-            removeClient(ptr, &clientList);
+            snprintf(record, sizeof record, "%s has disconnected\n", cPtr->addr);
+            removeClient(cPtr, &clientList);
+            goto record_filled;
         } else if (recvStatus != -1) { // message
-            snprintf(record, sizeof record, "%s: %s\n", ptr->addr, text);
-            printf("%s", record);
+            snprintf(record, sizeof record, "%s: %s\n", cPtr->addr, text);
+            goto record_filled;
         }
+        
+        continue;
 
-        // TODO Server commands
+        /* PROCESSING RECORD */
+        record_filled:
+        
+        // Server commands
+        if (cPtr != NULL && cPtr->admin == 1) {
+            char *cmd;
+            if ((cmd = strstr(record, "/kick")) != NULL) {
+                kickCmd(cmd, clientList, record, sizeof record);
+            }
+        }
 
         // Replicate messages to all clients
-        ptr = clientList;
-        while (ptr != NULL && recvStatus != -1) {
-            send(ptr->sockfd, record, sizeof record, 0);
-            ptr = ptr->next;
+        cPtr = clientList;
+        while (cPtr != NULL) {
+            if (cPtr->sockfd != ignorefd) {
+                send(cPtr->sockfd, record, sizeof record, 0);
+            }
+            cPtr = cPtr->next;
         }
+        printf("%s", record);
     }
 
     // Close

@@ -2,11 +2,13 @@
     Client linked list (contains socket and ip address)
     @param sockfd file descriptor of socket
     @param addr IP address
+    @param admin has access to commands
     @param *next ptr to next item in list
 */
 struct client {
     int sockfd;
-    char addr[INET6_ADDRSTRLEN];
+    char addr[46];
+    char admin;
     struct client *next;
 };
 
@@ -39,7 +41,7 @@ void freeConnections();
     @param buff_len size of buffer
     @return Recieve status (-1 if fail)
 */
-int recieveMessages(struct client *c, char *buff, int buff_len);
+int recieveMessage(struct client *c, char *buff, int buff_len);
 /*
     Fetches private IP address of local machine, places it in buffer
     @param *buff ptr to buffer
