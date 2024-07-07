@@ -1,2 +1,2 @@
 
-void kickCmd(char *cmd, void *clientList, char *record, int sizeRecord);
+void kickCmd(char *cmd, void *clientList, char *record, int record_len);

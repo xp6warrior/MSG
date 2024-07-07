@@ -3,41 +3,52 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netdb.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
+#include "comm.h"
 #include "server.h"
 #include "commands.h"
 
 #define DEFAULT_PORT 8000
 #define DEFAULT_IP "0.0.0.0"
-#define MAX_MSG_LEN 64
-#define MAX_RECORD_LEN 46 + MAX_MSG_LEN + 3
+#define DEFAULT_SERVER_NAME "untitled_server"
 
+#define MAX_MSG_LEN 64
+#define MAX_RECORD_LEN INET_ADDRSTRLEN + MAX_MSG_LEN + 1
+#define MAX_SERVER_NAME 30
 
 int main(int argc, char **argv) {
     char *ipAddress = DEFAULT_IP;
-    unsigned short int port = DEFAULT_PORT;
+    u_int16_t port = DEFAULT_PORT;
+    char *serverName = DEFAULT_SERVER_NAME;
 
     // Initialising IP and port from arguments
+    // TODO improve arguments
     switch (argc) {
-        case 1: // default ip default port
+        case 1: // no params
             printf("No IP address specified, default to system IP\n");
             printf("No port number specified, default to %d\n\n", DEFAULT_PORT);
             break;
-        case 2: // default port
+        case 2: // ip
             printf("No port number specified, default to %d\n\n", DEFAULT_PORT);
             ipAddress = argv[1];
             break;
-        case 3:
+        case 3: // ip and port
             ipAddress = argv[1];
             port = atoi(argv[2]);
             break;
+        case 4: // ip port and name
+            ipAddress = argv[1];
+            port = atoi(argv[2]);
+            serverName = argv[3];
+            if (strlen(serverName) > MAX_SERVER_NAME) {
+                fprintf(stderr, "invalid servername: must be less than %d characters\n", MAX_SERVER_NAME);
+                return -5;
+            }
+            break;
         default:
-            fprintf(stderr, "usage: MSG_Server [ipaddress] [port]\n");
+            fprintf(stderr, "usage: MSG_Server [ipaddress] [port] [servername]\n");
             return -1;
     }
 
@@ -68,12 +79,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ERROR: unable to listen\n");
         return -4;
     }
+
+    // Printing stuff
+    printf("\nServer name: %s\n", serverName);
     if (ipAddress == DEFAULT_IP) {
         char displayip[INET_ADDRSTRLEN];
         getDefaultIP(displayip, sizeof displayip);
-        printf("\nListening at %s on port %u\n", displayip, port);
+        printf("Listening at %s on port %u\n", displayip, port);
     } else {
-        printf("\nListening at %s on port %u\n", ipAddress, port);
+        printf("Listening at %s on port %u\n", ipAddress, port);
     }
     
 
@@ -87,7 +101,8 @@ int main(int argc, char **argv) {
     struct client serverClient = { 0, "Server", 1, NULL };
     addClient(&serverClient, &clientList);
 
-    while (1) {
+    char serverClosed = 0;
+    while (!serverClosed) {
         char record[MAX_RECORD_LEN] = {'\0'};
         struct client *cPtr;
         int ignorefd = -1;
@@ -102,7 +117,6 @@ int main(int argc, char **argv) {
         }
 
         // Recieve messeges from clients
-        // TODO Fix messages with spaces sent from clients
         cPtr = clientList;
         char text[MAX_MSG_LEN];
         int recvStatus = recieveMessage(cPtr, text, sizeof text);
@@ -127,23 +141,33 @@ int main(int argc, char **argv) {
         // Server commands
         if (cPtr != NULL && cPtr->admin == 1) {
             char *cmd;
+            if ((cmd = strstr(record, "/close")) != NULL) {
+                serverClosed = 1;
+                snprintf(record, sizeof record, "The server has been closed!\n");
+                ignorefd = 0;
+            } else
             if ((cmd = strstr(record, "/kick")) != NULL) {
                 kickCmd(cmd, clientList, record, sizeof record);
             }
         }
 
         // Replicate messages to all clients
-        cPtr = clientList;
+        if (clientList->sockfd != ignorefd) {
+            printf("%s", record);
+        }
+        cPtr = clientList->next;
         while (cPtr != NULL) {
             if (cPtr->sockfd != ignorefd) {
                 send(cPtr->sockfd, record, sizeof record, 0);
             }
             cPtr = cPtr->next;
         }
-        printf("%s", record);
     }
 
+    printf("Closing server\n");
+
     // Close
+    freeConnections(clientList->next); // skip 'server' client
     close(s_sock);
 
     return 0;

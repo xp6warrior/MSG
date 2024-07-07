@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <poll.h>
-#include <errno.h>
 
 int main(int argc, char **argv) {
     char *ipAddress;
@@ -37,7 +36,7 @@ int main(int argc, char **argv) {
     // Create socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == 0) {
-        fprintf(stderr, "ERROR: unable to create socked\n");
+        fprintf(stderr, "ERROR: unable to create socket\n");
         return -2;
     }
     printf("Created socket\n");
@@ -58,7 +57,10 @@ int main(int argc, char **argv) {
     recvPoll.events = POLLIN;
 
     while (1) {
-        char buffer[32];
+        char buffer[63];
+
+        // TODO Fix messages with spaces sent from clients
+        // TODO Fix issues when buffer is larger than MAX_MSG_LENGTH
 
         // Send
         if (poll(&sendPoll, 1, 100) == 1) {
@@ -69,7 +71,9 @@ int main(int argc, char **argv) {
         // Recieve
         if (poll(&recvPoll, 1, 100) == 1) {
             char allMsgs[256];
-            recv(sock, allMsgs, 256, 0);
+            if (recv(sock, allMsgs, 256, 0) == 0) {
+                break;
+            }
             printf("%s", allMsgs);
         }
     }
